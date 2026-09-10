@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IP Viewer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:linear-gradient(135deg,#1e3c72 0%,#2a5298 100%);min-height:100vh;padding:16px}
+.container{max-width:700px;margin:0 auto}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;color:white}
+.header h1{font-size:22px}
+.logout{color:white;text-decoration:none;font-size:14px;opacity:.8;border:1px solid rgba(255,255,255,.4);padding:6px 14px;border-radius:8px;cursor:pointer}
+.logout:hover{opacity:1}
+.device-card{background:white;border-radius:14px;padding:20px;margin-bottom:14px;box-shadow:0 4px 20px rgba(0,0,0,.15)}
+.device-name{font-size:18px;font-weight:700;color:#1e3c72;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.status-dot{width:10px;height:10px;border-radius:50%;background:#4caf50}
+.status-dot.offline{background:#ccc}
+.ip-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f0}
+.ip-row:last-child{border-bottom:none}
+.ip-label{font-size:12px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.ip-value{font-size:14px;color:#333;font-family:monospace;font-weight:600;word-break:break-all;text-align:right;max-width:60%}
+.ip-value.empty{color:#ccc;font-weight:400}
+.badge{display:inline-block;padding:2px 8px;background:#e8f5e9;color:#2e7d32;border-radius:4px;font-size:11px;margin-left:6px}
+.badge.warn{background:#fff3e0;color:#e65100}
+.updated{font-size:11px;color:#aaa;margin-top:10px;text-align:right}
+.empty-state{background:rgba(255,255,255,.95);border-radius:14px;padding:40px;text-align:center;color:#888}
+.empty-state h2{color:#1e3c72;margin-bottom:8px}
+.empty-state p{font-size:14px;line-height:1.6}
+.refresh-bar{text-align:center;margin-bottom:14px}
+.refresh-btn{background:rgba(255,255,255,.2);color:white;border:1px solid rgba(255,255,255,.4);padding:8px 20px;border-radius:8px;cursor:pointer;font-size:13px}
+.refresh-btn:hover{background:rgba(255,255,255,.3)}
+.footer{text-align:center;color:rgba(255,255,255,.6);font-size:12px;margin-top:20px}
+/* 登录页 */
+.login-box{background:white;border-radius:16px;padding:32px;width:100%;max-width:380px;margin:100px auto 0;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.login-box h1{font-size:22px;color:#1e3c72;text-align:center;margin-bottom:8px}
+.login-box .subtitle{text-align:center;color:#888;font-size:13px;margin-bottom:24px}
+.login-box .form-group{margin-bottom:16px}
+.login-box label{display:block;font-size:13px;color:#555;margin-bottom:6px;font-weight:600}
+.login-box input{width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:15px;outline:none;transition:border-color .2s}
+.login-box input:focus{border-color:#2a5298}
+.login-box .btn{width:100%;padding:13px;background:linear-gradient(135deg,#1e3c72,#2a5298);color:white;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-top:8px}
+.login-box .error{background:#ffebee;color:#c62828;padding:10px;border-radius:8px;font-size:13px;text-align:center;margin-bottom:16px}
+</style>
+</head>
+<body>
+
+<!-- ========== 登录界面 ========== -->
+<div id="login-view" class="login-box" style="display:none">
+<h1>📱 IP Viewer</h1>
+<p class="subtitle">查看已注册设备的 IP 地址</p>
+<div id="login-error" class="error" style="display:none">密码错误</div>
+<div class="form-group"><label>密码</label><input type="password" id="password-input" autofocus></div>
+<button class="btn" onclick="doLogin()">登录</button>
+</div>
+
+<!-- ========== 主界面 ========== -->
+<div id="main-view" class="container" style="display:none">
+<div class="header">
+<h1>📱 IP Viewer</h1>
+<span class="logout" onclick="doLogout()">退出登录</span>
+</div>
+<div class="refresh-bar">
+<button class="refresh-btn" onclick="loadDevices()">🔄 刷新</button>
+<span id="last-refresh" style="color:rgba(255,255,255,.7);font-size:12px;margin-left:10px"></span>
+</div>
+<div id="device-list"></div>
+<div class="footer">数据由设备端自动上报到 Gitee 仓库 · IP变化即时上报 · 平时每小时同步</div>
+</div>
+
+<script>
+// ============================================================
+//  ⚠️  请修改以下配置为你自己的信息
+// ============================================================
+const CONFIG = {
+  // 你的 Gitee 用户名
+  giteeUser: "chen-runyu2",
+  // Gitee 仓库名（存放devices.txt的公开仓库）
+  giteeRepo: "ipdata",
+  // Gitee 私人令牌（用于读取数据，projects权限）
+  giteeToken: "6d99f370ab1dcb0186dee9d29141608b",
+  // 存储数据的文件名（默认 devices.txt，不用改）
+  fileName: "devices.txt",
+  // 登录密码（请改成你自己的密码）
+  password: "admin",
+  // 自动刷新间隔（毫秒），默认60秒
+  refreshInterval: 60000
+};
+// ============================================================
+
+const GIST_API_URL = `https://gitee.com/api/v5/repos/${CONFIG.giteeUser}/${CONFIG.giteeRepo}/contents/${CONFIG.fileName}?ref=master`;
+
+// ========== 登录逻辑 ==========
+function doLogin() {
+  const input = document.getElementById('password-input').value;
+  if (input === CONFIG.password) {
+    sessionStorage.setItem('ipviewer_auth', '1');
+    showMain();
+  } else {
+    document.getElementById('login-error').style.display = 'block';
+  }
+}
+function doLogout() {
+  sessionStorage.removeItem('ipviewer_auth');
+  showLogin();
+}
+function showLogin() {
+  document.getElementById('login-view').style.display = 'block';
+  document.getElementById('main-view').style.display = 'none';
+  document.getElementById('password-input').value = '';
+  document.getElementById('login-error').style.display = 'none';
+}
+function showMain() {
+  document.getElementById('login-view').style.display = 'none';
+  document.getElementById('main-view').style.display = 'block';
+  loadDevices();
+}
+
+// ========== 时间格式化 ==========
+function timeAgo(iso) {
+  if (!iso) return '未知';
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return Math.floor(diff) + ' 秒前';
+  if (diff < 3600) return Math.floor(diff/60) + ' 分钟前';
+  if (diff < 86400) return Math.floor(diff/3600) + ' 小时前';
+  return Math.floor(diff/86400) + ' 天前';
+}
+function isOnline(iso) {
+  if (!iso) return false;
+  return (Date.now() - new Date(iso).getTime()) < 600000; // 10分钟内
+}
+
+// ========== 加载设备数据（通过Gitee API，支持跨域） ==========
+async function loadDevices() {
+  try {
+    const res = await fetch(GIST_API_URL + '?t=' + Date.now());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    // Gitee API 返回的 content 是 base64 编码，需要解码
+    const text = atob(data.content);
+    const container = document.getElementById('device-list');
+    const lines = text.trim().split('\n').filter(l => l.trim());
+    if (lines.length === 0) {
+      container.innerHTML = '<div class="empty-state"><h2>暂无设备</h2><p>还没有设备上报 IP。<br>请在手机上安装 Magisk 模块并重启。</p></div>';
+    } else {
+      const devices = lines.map(line => {
+        const [name, ipv4, ipv6, public_ip, iface, updated] = line.split('|');
+        return {name, ipv4, ipv6, public_ip, iface, updated};
+      }).sort((a,b) => a.name.localeCompare(b.name));
+      container.innerHTML = devices.map(d => {
+        const online = isOnline(d.updated);
+        const ipv6Public = d.ipv6 && /^[23]/.test(d.ipv6);
+        return '<div class="device-card">' +
+          '<div class="device-name"><span class="status-dot ' + (online?'':'offline') + '"></span>' + (d.name||'未知') + '</div>' +
+          '<div class="ip-row"><span class="ip-label">IPv4 内网</span><span class="ip-value ' + (d.ipv4?'':'empty') + '">' + (d.ipv4||'未获取') + '</span></div>' +
+          '<div class="ip-row"><span class="ip-label">IPv6</span><span class="ip-value ' + (d.ipv6?'':'empty') + '">' + (d.ipv6||'未获取') + (d.ipv6 ? (ipv6Public?' <span class="badge">公网</span>':' <span class="badge warn">内网</span>') : '') + '</span></div>' +
+          '<div class="ip-row"><span class="ip-label">公网出口IP</span><span class="ip-value ' + (d.public_ip?'':'empty') + '">' + (d.public_ip||'未获取') + '</span></div>' +
+          '<div class="ip-row"><span class="ip-label">网络接口</span><span class="ip-value">' + (d.iface||'未知') + '</span></div>' +
+          '<div class="updated">最后上报: ' + timeAgo(d.updated) + (d.updated?' · ' + new Date(d.updated).toLocaleString('zh-CN'):'') + '</div>' +
+          '</div>';
+      }).join('');
+    }
+    document.getElementById('last-refresh').textContent = '刷新于 ' + new Date().toLocaleTimeString('zh-CN');
+  } catch(e) {
+    console.error('加载失败:', e);
+    document.getElementById('device-list').innerHTML = '<div class="empty-state"><h2>加载失败</h2><p>无法获取数据，请检查 Gitee 用户名和仓库名是否配置正确，以及仓库中是否有 devices.txt 文件。<br>错误: ' + e.message + '</p></div>';
+  }
+}
+
+// ========== 初始化 ==========
+document.getElementById('password-input').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+if (sessionStorage.getItem('ipviewer_auth') === '1') {
+  showMain();
+} else {
+  showLogin();
+}
+setInterval(() => { if(sessionStorage.getItem('ipviewer_auth')==='1') loadDevices(); }, CONFIG.refreshInterval);
+</script>
+</body>
+</html>
